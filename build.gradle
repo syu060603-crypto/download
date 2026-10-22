@@ -1,0 +1,17 @@
+// 根 build.gradle —— 仅配置 Android Gradle Plugin 仓库
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.5.0'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
