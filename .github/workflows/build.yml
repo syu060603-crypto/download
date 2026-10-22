@@ -40,7 +40,10 @@ jobs:
           echo "sdk.dir=$SDK" > local.properties
           cat local.properties
 
-      # 下载官方 nodejs-mobile 安卓库（含 libnode.so + 头文件），解压到 app/libnode/
+      # 下载官方 nodejs-mobile 安卓库（含 libnode.so + 头文件）。
+      # 注意：zip 内部目录结构会随版本变化（可能是 bin/<abi>/ 或 lib/<abi>/，头文件层级也不同），
+      # 这里**不假设**其结构，而是解压后用 find 真实定位 libnode.so 与 node.h，再统一重排到
+      # app/libnode/lib/<abi>/libnode.so 与 app/libnode/include/node/，供 CMake 与 AGP 引用。
       - name: Download nodejs-mobile android libs (v18.20.4)
         run: |
           API="https://api.github.com/repos/nodejs-mobile/nodejs-mobile/releases/tags/v18.20.4"
@@ -48,21 +51,43 @@ jobs:
           echo "asset=$ASSET"
           if [ -z "$ASSET" ]; then echo "未找到 android 资源，请检查版本"; exit 1; fi
           curl -L -o nm.zip "$ASSET"
-          mkdir -p /tmp/nm app/libnode
+          rm -rf /tmp/nm app/libnode
+          mkdir -p /tmp/nm app/libnode/lib app/libnode/include/node
           unzip -o nm.zip -d /tmp/nm
-          # zip 根目录可能是 bin/ 和 include/，也可能套了一层文件夹，统一拍平到 app/libnode
-          SRC=$(find /tmp/nm -maxdepth 3 -type d -name bin | head -1)
-          if [ -n "$SRC" ]; then
-            cp -r "$SRC/.."/* app/libnode/
+
+          # 1) 定位所有 libnode.so，按 ABI 归类到 app/libnode/lib/<abi>/
+          found=0
+          for so in $(find /tmp/nm -type f -name 'libnode.so'); do
+            abi=$(echo "$so" | grep -oE '(arm64-v8a|armeabi-v7a|x86_64|x86)' | head -1)
+            if [ -n "$abi" ]; then
+              mkdir -p "app/libnode/lib/$abi"
+              cp -f "$so" "app/libnode/lib/$abi/libnode.so"
+              echo "copied: $so -> app/libnode/lib/$abi/libnode.so"
+              found=1
+            else
+              echo "WARN: 无法确定 ABI，跳过: $so"
+            fi
+          done
+          if [ "$found" -eq 0 ]; then echo "ERROR: 未在 zip 中找到任何 libnode.so"; exit 1; fi
+
+          # 2) 定位头文件目录（含 node.h），整目录拷到 app/libnode/include/node/
+          nd=$(find /tmp/nm -type f -name 'node.h' | head -1)
+          if [ -n "$nd" ]; then
+            nd_dir=$(dirname "$nd")
+            cp -rf "$nd_dir/." "app/libnode/include/node/"
+            echo "headers: $nd_dir -> app/libnode/include/node/"
+          else
+            echo "WARN: 未找到 node.h，编译可能失败"
           fi
+
           echo "--- app/libnode 结构 ---"
           find app/libnode -maxdepth 3 -type f | head -40
 
-      # 探测 nodejs-mobile 实际提供的 ABI，写进 gradle.properties 的 xckcdyAbiFilters，
-      # 让 AGP 只构建这些 ABI（避免某个 ABI 缺 libnode.so 而构建失败）。
+      # 探测 nodejs-mobile 实际提供的 ABI（已从 zip 重排到 app/libnode/lib/），
+      # 写进 gradle.properties 的 xckcdyAbiFilters，让 AGP 只构建这些 ABI。
       - name: Detect available node ABIs and pin abiFilters
         run: |
-          ABIS=$(ls app/libnode/bin 2>/dev/null | grep -E '^(arm64-v8a|armeabi-v7a|x86_64|x86)$' | paste -sd, -)
+          ABIS=$(ls app/libnode/lib 2>/dev/null | grep -E '^(arm64-v8a|armeabi-v7a|x86_64|x86)$' | paste -sd, -)
           echo "detected node ABIs: $ABIS"
           if [ -n "$ABIS" ]; then
             echo "xckcdyAbiFilters=$ABIS" >> gradle.properties

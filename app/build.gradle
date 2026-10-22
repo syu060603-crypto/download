@@ -49,6 +49,14 @@ android {
         }
     }
 
+    # 让 AGP 把官方 libnode.so 一起打进 APK（否则运行时加载 libxckcdy 会因找不到
+    # DT_NEEDED 的 libnode.so 而崩溃）。libnode.so 由 CI 按 ABI 放到 app/libnode/lib/<abi>/。
+    sourceSets {
+        main {
+            jniLibs.srcDirs += ['libnode/lib']
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
