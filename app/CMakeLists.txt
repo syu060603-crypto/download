@@ -12,5 +12,6 @@ set_target_properties(node PROPERTIES IMPORTED_LOCATION
     ${CMAKE_SOURCE_DIR}/../libnode/bin/${ANDROID_ABI}/libnode.so)
 
 # 我们的 JNI 桥：调用 node::Start 拉起 nodejs-project
-add_library(xckcdy SHARED native-lib.cpp)
+# 注意：CMakeLists.txt 位于 app/，源码在 app/src/main/cpp/，必须写相对路径
+add_library(xckcdy SHARED src/main/cpp/native-lib.cpp)
 target_link_libraries(xckcdy node log)
