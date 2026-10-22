@@ -46,11 +46,11 @@ jobs:
       # app/libnode/lib/<abi>/libnode.so 与 app/libnode/include/node/，供 CMake 与 AGP 引用。
       - name: Download nodejs-mobile android libs (v18.20.4)
         run: |
-          API="https://api.github.com/repos/nodejs-mobile/nodejs-mobile/releases/tags/v18.20.4"
-          ASSET=$(curl -s "$API" | grep -oE 'https://[^"]*android[^"]*\.zip' | head -1)
+          # 直接写死官方发布包地址，不再查 api.github.com（Actions 匿名 API 常被限流，
+          # 一旦返回空就会找不到资源而中断）。这是稳定的 release 直链，与 Gradle 下载同走 CDN。
+          ASSET="https://github.com/nodejs-mobile/nodejs-mobile/releases/download/v18.20.4/nodejs-mobile-v18.20.4-android.zip"
           echo "asset=$ASSET"
-          if [ -z "$ASSET" ]; then echo "未找到 android 资源，请检查版本"; exit 1; fi
-          curl -L -o nm.zip "$ASSET"
+          curl -L --retry 3 --retry-delay 5 -o nm.zip "$ASSET"
           rm -rf /tmp/nm app/libnode
           mkdir -p /tmp/nm app/libnode/lib app/libnode/include/node
           unzip -o nm.zip -d /tmp/nm
