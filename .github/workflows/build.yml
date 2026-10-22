@@ -49,6 +49,18 @@ jobs:
           echo "--- app/libnode 结构 ---"
           find app/libnode -maxdepth 3 -type f | head -40
 
+      # 探测 nodejs-mobile 实际提供的 ABI，写进 gradle.properties 的 xckcdyAbiFilters，
+      # 让 AGP 只构建这些 ABI（避免某个 ABI 缺 libnode.so 而构建失败）。
+      - name: Detect available node ABIs and pin abiFilters
+        run: |
+          ABIS=$(ls app/libnode/bin 2>/dev/null | grep -E '^(arm64-v8a|armeabi-v7a|x86_64|x86)$' | paste -sd, -)
+          echo "detected node ABIs: $ABIS"
+          if [ -n "$ABIS" ]; then
+            echo "xckcdyAbiFilters=$ABIS" >> gradle.properties
+          fi
+          echo "--- gradle.properties ---"
+          cat gradle.properties
+
       - name: Set up Gradle 8.9
         run: |
           curl -L -o gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
