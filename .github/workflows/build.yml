@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -18,18 +20,25 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
+      # GitHub 的 ubuntu 运行机已预装 Android SDK，无需 setup-android（该 action 已过时，
+      # 会尝试安装已不存在的 'tools' 包而失败）。直接用预装 SDK 的 sdkmanager 装所需组件。
       - name: Install SDK packages (platform / build-tools / NDK / CMake)
         run: |
-          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          SDK="/usr/local/lib/android/sdk"
+          [ -n "$ANDROID_HOME" ] && SDK="$ANDROID_HOME"
+          SDKMANAGER=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          echo "sdkmanager = $SDKMANAGER"
+          if [ -z "$SDKMANAGER" ]; then echo "未找到 sdkmanager，当前 SDK=$SDK"; exit 1; fi
           yes | "$SDKMANAGER" --licenses
           "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
           echo "ANDROID_SDK_ROOT = $ANDROID_SDK_ROOT"
 
       - name: Point local.properties at the SDK
-        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        run: |
+          SDK="/usr/local/lib/android/sdk"
+          [ -n "$ANDROID_HOME" ] && SDK="$ANDROID_HOME"
+          echo "sdk.dir=$SDK" > local.properties
+          cat local.properties
 
       # 下载官方 nodejs-mobile 安卓库（含 libnode.so + 头文件），解压到 app/libnode/
       - name: Download nodejs-mobile android libs (v18.20.4)
