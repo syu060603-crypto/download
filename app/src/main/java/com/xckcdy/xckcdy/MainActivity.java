@@ -190,7 +190,8 @@ public class MainActivity extends Activity {
             }
             in.close();
             out.close();
-            runOnUiThread(() -> Toast.makeText(this, "已保存到 下载/xckcdy/" + name, Toast.LENGTH_SHORT).show());
+            final String savedName = name;
+            runOnUiThread(() -> Toast.makeText(this, "已保存到 下载/xckcdy/" + savedName, Toast.LENGTH_SHORT).show());
         } catch (Exception e) {
             runOnUiThread(() -> Toast.makeText(this, "保存失败: " + e.getMessage(), Toast.LENGTH_LONG).show());
         }
