@@ -12,6 +12,7 @@ import android.app.AlertDialog;
 import android.util.Log;
 import android.webkit.DownloadListener;
 import android.webkit.JsResult;
+import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -80,8 +81,8 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            public boolean onConsoleMessage(WebView view, String message, int lineNumber, String sourceID) {
-                Log.d("XckcdyWebView", "console: " + message + " (" + sourceID + ":" + lineNumber + ")");
+            public boolean onConsoleMessage(ConsoleMessage cm) {
+                Log.d("XckcdyWebView", "console: " + cm.message() + " (" + cm.sourceId() + ":" + cm.lineNumber() + ")");
                 return true;
             }
         });
