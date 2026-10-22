@@ -90,7 +90,12 @@ public class MainActivity extends Activity {
             @Override
             public void onDownloadStart(String url, String userAgent, String contentDisposition,
                                         String mimetype, long contentLength) {
-                new Thread(() -> saveToDownloads(url)).start();
+                // DownloadListener 在 UI 线程回调：在这里取好 UA（回调自带 userAgent 参数），
+                // 后台线程只做 IO，绝不触碰 WebView —— 否则抛
+                // "A WebView method was called on thread ..." 导致保存失败。
+                final String ua = (userAgent != null && !userAgent.isEmpty())
+                        ? userAgent : webView.getSettings().getUserAgentString();
+                new Thread(() -> saveToDownloads(url, ua)).start();
             }
         });
         setContentView(webView);
@@ -186,12 +191,12 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    /** 把前端「保存到本机」的 localhost 下载请求落盘到系统下载目录 */
-    private void saveToDownloads(String urlStr) {
+    /** 把前端「保存到本机」的 localhost 下载请求落盘到系统下载目录（仅做 IO，禁止碰 WebView） */
+    private void saveToDownloads(String urlStr, String userAgent) {
         try {
             URL u = new URL(urlStr);
             HttpURLConnection c = (HttpURLConnection) u.openConnection();
-            c.setRequestProperty("User-Agent", webView.getSettings().getUserAgentString());
+            c.setRequestProperty("User-Agent", userAgent);
             c.connect();
 
             String cd = c.getHeaderField("Content-Disposition");
@@ -228,8 +233,11 @@ public class MainActivity extends Activity {
             out.close();
             final String savedName = name;
             runOnUiThread(() -> Toast.makeText(this, "已保存到 下载/xckcdy/" + savedName, Toast.LENGTH_SHORT).show());
-        } catch (Exception e) {
-            runOnUiThread(() -> Toast.makeText(this, "保存失败: " + e.getMessage(), Toast.LENGTH_LONG).show());
+        } catch (Throwable e) {
+            // 注意：WebView 内部抛的是裸 Throwable（不是 Exception），必须按 Throwable 接住，
+            // 否则线程直接死掉、看不到任何提示。
+            final String msg = (e.getMessage() != null) ? e.getMessage() : String.valueOf(e);
+            runOnUiThread(() -> Toast.makeText(this, "保存失败: " + msg, Toast.LENGTH_LONG).show());
         }
     }
 
