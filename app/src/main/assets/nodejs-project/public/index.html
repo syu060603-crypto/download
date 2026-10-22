@@ -183,6 +183,26 @@ input[type=text]:focus,input[type=number]:focus,select:focus{border-color:var(--
 <script>
 (function(){
 'use strict';
+
+/* 全局错误横幅：手机端没有控制台，出错时直接在页面顶部红字显示 */
+function showBanner(msg){
+  var b=document.getElementById('errbar');
+  if(!b){
+    b=document.createElement('div'); b.id='errbar';
+    b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;'+
+      'font-size:13px;padding:10px 12px;line-height:1.4;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    (document.body||document.documentElement).appendChild(b);
+  }
+  b.textContent='⚠ '+msg; b.style.display='block';
+  setTimeout(function(){ if(b) b.style.display='none'; }, 7000);
+}
+window.addEventListener('error', function(e){
+  showBanner('页面错误: '+(e.message||e.error||'未知')+(e.filename?(' @'+e.filename+':'+e.lineno):''));
+});
+window.addEventListener('unhandledrejection', function(e){
+  var r=e.reason; showBanner('异步错误: '+((r&&r.message)||r||'未知'));
+});
+
 var $=function(s){return document.querySelector(s)};
 var $$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
 var state={vid:null,title:'',pic:'',groups:[],active:null,sel:{},m3u8:{},cc:8};

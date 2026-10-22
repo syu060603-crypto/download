@@ -8,7 +8,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.app.AlertDialog;
+import android.util.Log;
 import android.webkit.DownloadListener;
+import android.webkit.JsResult;
+import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
@@ -50,6 +54,37 @@ public class MainActivity extends Activity {
         webView.getSettings().setLoadWithOverviewMode(true);
         webView.getSettings().setUseWideViewPort(true);
         webView.setWebViewClient(new WebViewClient());
+        // 关键：不设置 WebChromeClient 时，网页里的 confirm()/alert() 会静默失效
+        // （confirm 直接返回 false），导致「批量下载」在点确认前就被 return 中断。
+        // 这里用原生对话框承接 JS 的 alert/confirm，并把 console 日志输出到 logcat。
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok, (d, w) -> result.confirm())
+                        .setCancelable(false)
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok, (d, w) -> result.confirm())
+                        .setNegativeButton(android.R.string.cancel, (d, w) -> result.cancel())
+                        .setCancelable(false)
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onConsoleMessage(WebView view, String message, int lineNumber, String sourceID) {
+                Log.d("XckcdyWebView", "console: " + message + " (" + sourceID + ":" + lineNumber + ")");
+                return true;
+            }
+        });
         webView.setDownloadListener(new DownloadListener() {
             @Override
             public void onDownloadStart(String url, String userAgent, String contentDisposition,
