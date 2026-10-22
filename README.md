@@ -16,21 +16,21 @@
 
 1. 在 github.com 新建一个**空仓库**（public / private 均可）。
 2. 把本目录全部内容 push 上去（见下方命令）。
-3. 进仓库 **Actions** 选项卡 → 左边选 `Build APK` → **Run workflow**。
+3. 进仓库 **Actions** 选项卡 → 左边选 `Build APK` → **Run workflow**（其实 push 上去就会自动触发）。
 4. 等待 3–8 分钟，构建完成后在 **Artifacts** 里下载 `app-debug.apk`。
 5. 手机安装：把 `app-debug.apk` 拷到手机，允许「未知来源」安装即可。
    （debug 签名对个人使用完全够用；要正式签名版看第三节。）
 
+> ⚠️ 本目录已经是 git 仓库，`origin` 已指向你的 `download.git`，当前分支是 `master`，
+> 代码也已提交。你只需在**自己电脑的终端**（不要走本工具的代理网络）执行下面一行即可推送：
+
 ```bash
-git init
-git add -A
-git commit -m "xckcdy android"
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-git branch -M main
-git push -u origin main
+# 在 E:/WorkBuddyPath/2026-10-22-12-52-28/xckcdy-apk 目录下
+git push -u origin master
 ```
 
-> 构建必须在 GitHub 上触发（需要 Android SDK + NDK + nodejs-mobile 二进制，本地没有也能构建）。
+- 如果提示 `failed to push` 是因为远程仓库已有提交（非真正空仓），先 `git pull origin master --rebase` 再推。
+- 构建必须在 GitHub 上触发（需要 Android SDK + NDK + nodejs-mobile 二进制，本地没有也能构建）。
 
 ---
 
