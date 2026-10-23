@@ -18,6 +18,11 @@ function envInt(k, d) {
   const v = parseInt(process.env[k], 10);
   return Number.isFinite(v) ? v : d;
 }
+function envBool(k, d) {
+  const v = process.env[k];
+  if (v === undefined || v === '') return d;
+  return !/^(0|false|no|off)$/i.test(String(v));
+}
 
 const SITE = envStr('APP_SITE', 'https://www.xckcdy.com').replace(/\/+$/, '');
 
@@ -100,6 +105,15 @@ module.exports = {
   SEGMENT_CONCURRENCY_MAX: envInt('APP_SEG_CONC_MAX', 24),
   SEGMENT_RETRY: envInt('APP_SEG_RETRY', 4),
   SEGMENT_TIMEOUT: envInt('APP_SEG_TIMEOUT', 25000),
+
+  // ---------------------------------------------------------------- 广告剔除
+  // 站方会在正片中间插播整段广告：广告分片的编码参数与正片不同、时间轴从 0 重来。
+  // 保留这些分片会导致手机播放器「解析中」卡住、音画不同步，所以下载时直接丢掉。
+  STRIP_ADS: envBool('APP_STRIP_ADS', true),
+  AD_PROBE_BYTES: envInt('APP_AD_PROBE_BYTES', 65536), // 每个候选块只取首片前 64KB 探测
+  AD_MAX_BLOCK_SECONDS: envInt('APP_AD_MAX_BLOCK', 180), // 超过这个时长的块不可能是广告
+  AD_PTS_RESTART: envInt('APP_AD_PTS_RESTART', 12), // 首帧 PTS < 12s 视为时间轴重启
+  AD_MAX_RATIO: 0.5, // 剔除超过一半就判定为误判，全部保留
 
   // ---------------------------------------------------------------- 缓存
   SEARCH_CACHE_TTL: 10 * 60 * 1000,

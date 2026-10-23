@@ -436,6 +436,7 @@ const server = http.createServer(async (req, res) => {
         defaults: {
           episodeConcurrency: CFG.EPISODE_CONCURRENCY,
           segmentConcurrency: CFG.SEGMENT_CONCURRENCY,
+          stripAds: CFG.STRIP_ADS,
         },
       });
     }

@@ -16,6 +16,7 @@ const path = require('path');
 const crypto = require('crypto');
 const CFG = require('../config');
 const { getBuffer, getText } = require('./http');
+const ads = require('./ads');
 
 const REFERER = CFG.SITE + '/';
 
@@ -54,6 +55,7 @@ function parseMaster(text, base) {
 function parseMedia(text, base) {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const segs = [];
+  const discs = []; // 每个 #EXT-X-DISCONTINUITY 之后第一个分片的下标
   let key = null;
   let duration = 0;
   let mapUrl = null;
@@ -70,7 +72,10 @@ function parseMedia(text, base) {
 
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (l.indexOf('#EXT-X-KEY') === 0) {
+    if (l.indexOf('#EXT-X-DISCONTINUITY') === 0 && l.charAt(19) !== '-') {
+      // 注意排除 #EXT-X-DISCONTINUITY-SEQUENCE
+      if (discs[discs.length - 1] !== segs.length) discs.push(segs.length);
+    } else if (l.indexOf('#EXT-X-KEY') === 0) {
       const method = /METHOD=([^,]+)/i.exec(l);
       const uri = /URI="([^"]+)"/i.exec(l);
       const iv = /IV=0x([0-9a-fA-F]+)/i.exec(l);
@@ -91,7 +96,7 @@ function parseMedia(text, base) {
     }
   }
   const totalDuration = segs.reduce((a, s) => a + s.duration, 0);
-  return { segs, key, mapUrl, mediaSeq, totalDuration };
+  return { segs, discs, key, mapUrl, mediaSeq, totalDuration };
 }
 
 function ivBuffer(seg) {
@@ -204,8 +209,8 @@ function writeJson(file, obj) {
  * 下载整集
  * @param {string} m3u8Url
  * @param {string} outFile
- * @param {object} opts { concurrency, signal, onProgress, quality, resume }
- * @returns {Promise<{total,bytes,segments,bandwidth,resumed}>}
+ * @param {object} opts { concurrency, signal, onProgress, quality, resume, stripAds }
+ * @returns {Promise<{total,bytes,segments,bandwidth,resumed,ads}>}
  */
 async function downloadEpisode(m3u8Url, outFile, opts = {}) {
   const concurrency = Math.max(1, Math.min(opts.concurrency || CFG.SEGMENT_CONCURRENCY, 64));
@@ -219,11 +224,59 @@ async function downloadEpisode(m3u8Url, outFile, opts = {}) {
     quality: opts.quality,
   });
   const media = parseMedia(text, base);
-  const segs = media.segs;
-  if (!segs.length) throw new Error('播放列表中没有分片');
+  const allSegs = media.segs;
+  if (!allSegs.length) throw new Error('播放列表中没有分片');
+
+  // ---------------------------------------------------------------- 广告剔除
+  // 广告块被两段 #EXT-X-DISCONTINUITY 包住，编码参数与正片不同、时间轴从 0 重来。
+  // 直接丢掉这些分片即可：正片两侧的 PTS 本来就是连着的，不需要重写时间戳。
+  const playlistSig = ads.playlistKey(allSegs, media.discs);
+  const prevState = readJson(stateFile);
+  const prevChecked =
+    prevState && prevState.playlistSig === playlistSig && Array.isArray(prevState.adRanges);
+
+  let adInfo = null;
+  let adRanges = [];
+  if (opts.stripAds !== false && CFG.STRIP_ADS) {
+    if (prevChecked) {
+      // 上次已经探测过：直接复用，避免重下时探测结果抖动导致断点失效
+      adRanges = prevState.adRanges;
+      let segsN = 0;
+      let secs = 0;
+      for (const r of adRanges) {
+        segsN += r.segments || 0;
+        secs += r.seconds || 0;
+      }
+      adInfo = { enabled: true, ok: true, ranges: adRanges, removedSegments: segsN, removedSeconds: Math.round(secs), reused: true };
+    } else {
+      adInfo = await ads.detect(allSegs, media.discs, { signal });
+      adRanges = (adInfo && adInfo.ranges) || [];
+    }
+  }
+
+  let keep = adRanges.length ? ads.buildKeep(allSegs.length, adRanges) : null;
+  if (keep && !keep.length) {
+    // 理论上不会发生（有 AD_MAX_RATIO 兜底），真发生了就退化为不剔除
+    keep = null;
+    adRanges = [];
+    adInfo = null;
+  }
+  const segs = keep ? keep.map((i) => allSegs[i]) : allSegs;
+  const adSummary =
+    adRanges.length && adInfo
+      ? {
+          ranges: adRanges.length,
+          segments: adInfo.removedSegments || 0,
+          seconds: adInfo.removedSeconds || 0,
+        }
+      : null;
 
   // 指纹：用于判断 .part 是否属于同一次下载（不含域名/token，重新解析后仍可续传）
-  const sig = segs.length + '|' + segs[0].url.replace(/^https?:\/\/[^/]+/, '');
+  const sig =
+    segs.length +
+    '|' +
+    segs[0].url.replace(/^https?:\/\/[^/]+/, '') +
+    (adRanges.length ? '|ad' + adRanges.map((r) => r.from + '-' + r.to).join('.') : '');
 
   let keyBuf = null;
   if (media.key && media.key.method === 'AES-128' && media.key.url) {
@@ -260,7 +313,7 @@ async function downloadEpisode(m3u8Url, outFile, opts = {}) {
   }
 
   // 先上报一次总片数：界面立刻能显示 x/总片数，而不是 0/0
-  onProgress({ done: startIdx, total, bytes, speed: 0, eta: 0, resumed });
+  onProgress({ done: startIdx, total, bytes, speed: 0, eta: 0, resumed, ads: adSummary });
 
   const fd = fs.openSync(partFile, startIdx > 0 ? 'a' : 'w');
   let closed = false;
@@ -341,6 +394,7 @@ async function downloadEpisode(m3u8Url, outFile, opts = {}) {
       speed: Math.round(speed),
       eta: Math.max(0, Math.min(eta, 86400)),
       resumed,
+      ads: adSummary,
     });
   };
 
@@ -373,8 +427,20 @@ async function downloadEpisode(m3u8Url, outFile, opts = {}) {
     }
   };
 
+  // 状态文件同时记下广告剔除方案：重下时直接复用，不重新探测（探测结果抖动会让断点失效）
+  const saveState = () =>
+    writeJson(stateFile, {
+      sig,
+      total,
+      written: nextWrite,
+      bytes,
+      ts: Date.now(),
+      playlistSig,
+      adRanges,
+    });
+
   const stateSaver = setInterval(() => {
-    if (nextWrite > startIdx) writeJson(stateFile, { sig, total, written: nextWrite, bytes, ts: Date.now() });
+    if (nextWrite > startIdx) saveState();
   }, 2000);
 
   try {
@@ -406,7 +472,7 @@ async function downloadEpisode(m3u8Url, outFile, opts = {}) {
     notify();
     // 让写者尽快退出
     await writer.catch(() => {});
-    writeJson(stateFile, { sig, total, written: nextWrite, bytes, ts: Date.now() });
+    writeJson(stateFile, { sig, total, written: nextWrite, bytes, ts: Date.now(), playlistSig, adRanges });
     closeFd();
     if (e && e.aborted) {
       throw e; // 保留 .part 以便续传
@@ -438,10 +504,12 @@ async function downloadEpisode(m3u8Url, outFile, opts = {}) {
     total,
     bytes,
     segments: segs.length,
+    sourceSegments: allSegs.length,
     bandwidth: variant ? variant.bandwidth : 0,
     resolution: variant ? variant.resolution : '',
     variants: variants.map((v) => ({ bandwidth: v.bandwidth, resolution: v.resolution })),
     resumed,
+    ads: adSummary,
   };
 }
 
@@ -454,6 +522,7 @@ async function probe(m3u8Url, opts = {}) {
     segments: m.segs.length,
     duration: m.totalDuration,
     encrypted: !!(m.key && m.key.method === 'AES-128'),
+    discontinuities: m.discs.length,
   };
 }
 

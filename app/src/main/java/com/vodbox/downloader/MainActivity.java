@@ -51,7 +51,7 @@ public class MainActivity extends Activity {
     private static final int PORT = 8787;
     private static final String PROJECT = "nodejs-project";
     /** 改动 assets/nodejs-project 里的任何文件后，把这个数字 +1，升级时才会覆盖旧文件 */
-    private static final int ASSET_VERSION = 3;
+    private static final int ASSET_VERSION = 4;
 
     private WebView webView;
     private LinearLayout splash;

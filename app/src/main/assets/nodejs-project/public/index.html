@@ -208,6 +208,13 @@ select.q{padding:8px 10px;border-radius:10px;border:1px solid var(--line);backgr
 .adv span{white-space:nowrap}
 .adv .grp{display:flex;align-items:center;gap:6px;flex:1 1 130px;min-width:120px}
 .adv input[type=range]{flex:1;min-width:52px;accent-color:var(--accent);height:18px}
+.adv .grp.sw{flex:0 0 100%;min-width:0;justify-content:space-between}
+.adv .tg{position:relative;display:inline-block;width:36px;height:21px;flex:none}
+.adv .tg input{position:absolute;inset:0;opacity:0;margin:0;width:100%;height:100%;z-index:2}
+.adv .tg i{position:absolute;inset:0;border-radius:11px;background:var(--surface-2);border:1px solid var(--line);transition:.18s}
+.adv .tg i::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--muted);transition:.18s}
+.adv .tg input:checked+i{background:var(--accent);border-color:var(--accent)}
+.adv .tg input:checked+i::after{transform:translateX(15px);background:#fff}
 
 /* ---------- 任务 ---------- */
 .seg{display:flex;gap:4px;padding:4px;background:var(--surface-2);border-radius:12px;margin:6px 0 14px}
@@ -253,15 +260,18 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
 .f .fs{width:96px;flex:none;text-align:right;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
 .f .fgo{flex:none;font-size:11.5px;color:var(--accent);padding:2px 6px;border-radius:6px;background:var(--accent-weak)}
 .f .ferr{color:var(--danger)}
+.f .fad{flex:none;font-size:10px;line-height:1.4;padding:1px 5px;border-radius:4px;background:var(--accent-weak);color:var(--accent);font-weight:600}
 
 /* ---------- Toast / 确认 ---------- */
 #toasts{position:fixed;left:50%;bottom:calc(78px + var(--safe-b));transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:100%;padding:0 20px}
+#toasts.sheet{bottom:auto;top:calc(64px + env(safe-area-inset-top,0px))}
 .toast{
   max-width:420px;padding:10px 16px;border-radius:12px;font-size:13.5px;color:#fff;background:rgba(24,28,38,.94);
   box-shadow:0 8px 28px rgba(0,0,0,.28);animation:tin .22s ease;display:flex;gap:8px;align-items:center;line-height:1.4
 }
 .toast.ok{background:rgba(15,157,88,.96)}
 .toast.err{background:rgba(229,72,77,.96)}
+.toast.warn{background:rgba(206,132,0,.96)}
 @keyframes tin{from{opacity:0;transform:translateY(8px) scale(.97)}}
 .toast.out{animation:tout .2s ease forwards}
 @keyframes tout{to{opacity:0;transform:translateY(-4px)}}
@@ -376,6 +386,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
       <div class="adv">
         <div class="grp"><span>同时下载</span><input type="range" id="dEpConc" min="1" max="4" step="1" value="2"><span><b id="dEpConcN">2</b> 集</span></div>
         <div class="grp"><span>分片并发</span><input type="range" id="dSegConc" min="2" max="24" step="2" value="8"><span><b id="dSegConcN">8</b></span></div>
+        <div class="grp sw"><span>剔除广告</span><label class="tg"><input type="checkbox" id="dStripAds" checked><i></i></label></div>
       </div>
     </div>
   </div>
@@ -426,6 +437,14 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     if (m > 0) return m + ' 分 ' + ss + ' 秒';
     return ss + ' 秒';
   }
+  function fmtDur(s) {
+    s = Math.round(s || 0);
+    if (s <= 0) return '0 秒';
+    if (s < 120) return s + ' 秒';
+    var m = Math.floor(s / 60), ss = s % 60;
+    if (m >= 60) return Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
+    return m + ' 分' + (ss ? ' ' + ss + ' 秒' : '');
+  }
 
   async function api(url, opts) {
     var r = await fetch(url, opts);
@@ -439,7 +458,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
   function toast(msg, type, ms) {
     var el = document.createElement('div');
     el.className = 'toast' + (type ? ' ' + type : '');
-    el.innerHTML = (type === 'ok' ? '✓ ' : type === 'err' ? '! ' : '') + esc(msg);
+    el.innerHTML = (type === 'ok' ? '✓ ' : type === 'err' || type === 'warn' ? '! ' : '') + esc(msg);
     $('#toasts').appendChild(el);
     setTimeout(function () {
       el.classList.add('out');
@@ -623,11 +642,14 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     s.hidden = false;
     requestAnimationFrame(function () { s.classList.add('open'); });
     document.body.style.overflow = 'hidden';
+    // 详情面板打开时，底部被面板占住，提示条改到顶部显示
+    $('#toasts').classList.add('sheet');
   }
   function closeSheet() {
     var s = $('#sheet');
     s.classList.remove('open');
     document.body.style.overflow = '';
+    $('#toasts').classList.remove('sheet');
     setTimeout(function () { s.hidden = true; }, 260);
   }
   $$('#sheet [data-close]').forEach(function (b) { b.onclick = closeSheet; });
@@ -785,6 +807,10 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
   $('#dEpConc').oninput = function () { $('#dEpConcN').textContent = this.value; LS.set('epConc', +this.value); };
   $('#dSegConc').oninput = function () { $('#dSegConcN').textContent = this.value; LS.set('segConc', +this.value); };
   $('#dQuality').onchange = function () { LS.set('quality', this.value); };
+  $('#dStripAds').onchange = function () {
+    LS.set('stripAds', this.checked);
+    if (!this.checked) toast('已关闭广告剔除，插播广告会保留在文件里', 'warn');
+  };
 
   $('#dDownload').onclick = async function () {
     var g = curGroup();
@@ -818,7 +844,8 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
           items: items,
           quality: $('#dQuality').value,
           episodeConcurrency: parseInt($('#dEpConc').value, 10),
-          segmentConcurrency: parseInt($('#dSegConc').value, 10)
+          segmentConcurrency: parseInt($('#dSegConc').value, 10),
+          stripAds: $('#dStripAds').checked
         })
       });
       var st = d.job ? d.job.status : '';
@@ -877,7 +904,8 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     $('.jt b', el).textContent = j.title;
     $('.jt small', el).textContent = j.stats.finished + '/' + j.stats.count + ' 集 · ' + j.stats.percent + '% · ' + fmtSize(j.stats.bytes) +
       (j.stats.speed ? ' · ' + fmtSpeed(j.stats.speed) : '') +
-      (j.stats.eta ? ' · 剩 ' + fmtEta(j.stats.eta) : '');
+      (j.stats.eta ? ' · 剩 ' + fmtEta(j.stats.eta) : '') +
+      (j.stats.adsBlocks ? ' · 已去广告 ' + j.stats.adsBlocks + ' 段 ' + fmtDur(j.stats.adsSeconds) : '');
     var pill = $('.st', el);
     pill.className = 'st ' + st.cls;
     pill.textContent = st.text;
@@ -919,7 +947,10 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
       var go = (f.status === 'done' && f.hasFile)
         ? '<button class="fgo" data-save="' + f.idx + '">保存</button>'
         : (f.error ? '<span class="ferr" title="' + esc(f.error) + '">!</span>' : '');
-      return '<div class="f"><span class="fn">' + esc(f.name) + '</span>' +
+      var adTag = (f.ads && f.ads.ranges)
+        ? '<span class="fad" title="已剔除 ' + f.ads.ranges + ' 段广告，共 ' + fmtDur(f.ads.seconds) + '">去广告</span>'
+        : '';
+      return '<div class="f"><span class="fn">' + esc(f.name) + '</span>' + adTag +
         '<div class="fb"><i class="' + cls + '" style="width:' + pct + '%"></i></div>' +
         '<span class="fs">' + esc(txt) + '</span>' + go + '</div>';
     }).join('');
@@ -1119,6 +1150,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     var sc = LS.get('segConc', 8);
     $('#dEpConc').value = ec; $('#dEpConcN').textContent = ec;
     $('#dSegConc').value = sc; $('#dSegConcN').textContent = sc;
+    $('#dStripAds').checked = LS.get('stripAds', true) !== false;
 
     renderChips();
     emptyState('🎬', '搜索你想看的剧', '输入剧名开始，支持批量选择分集下载。', false);
@@ -1134,6 +1166,9 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
       if (info.defaults) {
         if (!LS.get('epConc', 0)) { $('#dEpConc').value = info.defaults.episodeConcurrency; $('#dEpConcN').textContent = info.defaults.episodeConcurrency; }
         if (!LS.get('segConc', 0)) { $('#dSegConc').value = info.defaults.segmentConcurrency; $('#dSegConcN').textContent = info.defaults.segmentConcurrency; }
+        if (LS.get('stripAds', null) === null && typeof info.defaults.stripAds === 'boolean') {
+          $('#dStripAds').checked = info.defaults.stripAds;
+        }
       }
     } catch (e) {
       setOnline(false);

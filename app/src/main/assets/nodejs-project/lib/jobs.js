@@ -115,6 +115,7 @@ function fileSnapshot(f, i) {
     eta: f.eta || 0,
     error: f.error || null,
     hasFile: !!(f.file && f.status === 'done'),
+    ads: f.ads || null,
   };
 }
 
@@ -124,11 +125,17 @@ function snapshot(job) {
   let total = 0;
   let bytes = 0;
   let speed = 0;
+  let adsSeconds = 0;
+  let adsBlocks = 0;
   const files = job.files.map((f, i) => {
     done += f.done || 0;
     total += f.total || 0;
     bytes += f.bytes || 0;
     speed += f.speed || 0;
+    if (f.ads) {
+      adsSeconds += f.ads.seconds || 0;
+      adsBlocks += f.ads.ranges || 0;
+    }
     return fileSnapshot(f, i);
   });
   const finished = files.filter((f) => f.status === 'done' || f.status === 'skipped').length;
@@ -144,6 +151,7 @@ function snapshot(job) {
     dir: job.dir,
     episodeConcurrency: job.episodeConcurrency,
     segmentConcurrency: job.segmentConcurrency,
+    stripAds: job.stripAds !== false,
     files,
     stats: {
       done,
@@ -153,6 +161,8 @@ function snapshot(job) {
       percent: total ? Math.round((done / total) * 100) : finished === files.length && files.length ? 100 : 0,
       finished,
       count: files.length,
+      adsSeconds,
+      adsBlocks,
       eta: speed > 0 && total > done ? Math.round(((total - done) * (bytes / Math.max(1, done))) / speed) : 0,
     },
   };
@@ -212,6 +222,7 @@ function create(body) {
     quality,
     episodeConcurrency,
     segmentConcurrency,
+    stripAds: body.stripAds === undefined ? CFG.STRIP_ADS : !!body.stripAds,
     dir,
     createdAt: Date.now(),
     status: 'queued',
@@ -289,6 +300,7 @@ async function runFile(job, f, ctl) {
   const info = await hls.downloadEpisode(f.m3u8, f.file, {
     concurrency: job.segmentConcurrency,
     quality: job.quality,
+    stripAds: job.stripAds !== false,
     signal,
     onProgress: (p) => {
       f.done = p.done;
@@ -296,12 +308,14 @@ async function runFile(job, f, ctl) {
       f.bytes = p.bytes;
       f.speed = p.speed;
       f.eta = p.eta;
+      if (p.ads) f.ads = p.ads;
       emit('file', job);
     },
   });
   f.done = info.total;
   f.total = info.total;
   f.bytes = info.bytes;
+  f.ads = info.ads || f.ads || null;
   f.speed = 0;
   f.eta = 0;
   f.status = 'done';
