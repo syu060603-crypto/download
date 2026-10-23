@@ -1,10 +1,13 @@
 'use strict';
-// nodejs-mobile 入口：拉起我们现有的星辰影视下载服务端。
-// server.js 内部会 require('./lib/*') 并监听 0.0.0.0:8787，
-// WebView 通过 http://127.0.0.1:8787 访问。
+/**
+ * nodejs-mobile 入口：在手机本地拉起下载服务。
+ * server.js 监听 127.0.0.1:8787（手机上不对外暴露），WebView 通过回环地址访问。
+ */
+process.env.APP_BIND = process.env.APP_BIND || '127.0.0.1';
+
 try {
   require('./server.js');
-  console.log('[xckcdy] node server started');
+  console.log('[app] service started');
 } catch (e) {
-  console.error('[xckcdy] server failed:', (e && e.stack) || e);
+  console.error('[app] service failed:', (e && e.stack) || e);
 }

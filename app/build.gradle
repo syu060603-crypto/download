@@ -1,22 +1,22 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace 'com.xckcdy.xckcdy'
+    namespace 'com.vodbox.downloader'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.xckcdy.xckcdy"
+        applicationId "com.vodbox.downloader"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "2.0.0"
 
         ndkVersion "26.1.10909125"
 
         // 只构建 nodejs-mobile 实际提供的 ABI（由 CI 探测后写入 gradle.properties 的
-        // xckcdyAbiFilters；此处给出兜底默认值，避免某个 ABI 缺 libnode.so 导致构建失败）。
+        // vodAbiFilters；此处给出兜底默认值，避免某个 ABI 缺 libnode.so 导致构建失败）。
         ndk {
-            def abiProp = project.findProperty('xckcdyAbiFilters')?.toString()?.trim()
+            def abiProp = project.findProperty('vodAbiFilters')?.toString()?.trim()
             if (abiProp) {
                 abiFilters = abiProp.split(',').collect { it.trim() }.findAll { it }
             } else {
@@ -49,7 +49,7 @@ android {
         }
     }
 
-    // 让 AGP 把官方 libnode.so 一起打进 APK（否则运行时加载 libxckcdy 会因找不到
+    // 让 AGP 把官方 libnode.so 一起打进 APK（否则运行时加载 libvodbox 会因找不到
     // DT_NEEDED 的 libnode.so 而崩溃）。libnode.so 由 CI 按 ABI 放到 app/libnode/lib/<abi>/。
     sourceSets {
         main {

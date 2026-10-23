@@ -20,3 +20,8 @@ Thumbs.db
 # Node project runtime artifacts (kept in assets, but ignore stray)
 node_modules/
 npm-debug.log
+
+# 本地运行时数据（下载文件 / 任务状态 / 脚本缓存），不入库
+app/src/main/assets/nodejs-project/downloads/
+app/src/main/assets/nodejs-project/data/
+app/src/main/assets/nodejs-project/cache/

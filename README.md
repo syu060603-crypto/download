@@ -1,85 +1,124 @@
-# 星辰下载 · Android APK（手机独立运行版）
+# 影视下载器 · Android（手机独立运行）
 
-把之前做好的 **星辰影视批量下载服务端** 通过 [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile)
-直接塞进一个安卓 App：App 启动时在手机本地拉起 Node 运行时（跑 `server.js`），再用内置 WebView
-打开 `http://127.0.0.1:8787`。**服务端就跑在手机上，不依赖任何电脑或外部服务器。**
+用 [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile) 把一个本地 Node 服务塞进安卓 App：
+App 启动时在手机本地拉起服务（`127.0.0.1:8787`），内置 WebView 打开界面。
+**服务跑在手机上，不依赖电脑或任何外部服务器。**
 
-- 搜索剧名 → 选线路（量子/优质/非凡/暴风…）→ 勾选分集 → 批量下载
-- 断点跳过、中途取消、保存到本机（落到系统「下载/xckcdy」）
-- 复用电脑版 100% 的解析/下载逻辑，站方改版后调 `/api/refresh` 自愈
+- 搜索剧名 → 选线路 → 勾选分集 → 批量下载
+- 前台服务保活：切后台、锁屏、划掉任务卡片都能继续下
+- 多集并行、分片并发、断点续传、暂停/继续/重试
+- 保存到系统「下载/VodBox」，通知栏显示进度
+
+| 搜索 | 选集 | 下载 | 深色模式 |
+|---|---|---|---|
+| ![搜索](docs/screens/search.png) | ![选集](docs/screens/detail.png) | ![下载](docs/screens/jobs.png) | ![深色](docs/screens/jobs-dark.png) |
 
 ---
 
 ## 一、云构建（推荐，本地零安装）
 
-你只需要一个 GitHub 仓库，其余全自动。
+只需要一个 GitHub 仓库，其余全自动。
 
-1. 在 github.com 新建一个**空仓库**（public / private 均可）。
-2. 把本目录全部内容 push 上去（见下方命令）。
-3. 进仓库 **Actions** 选项卡 → 左边选 `Build APK` → **Run workflow**（其实 push 上去就会自动触发）。
-4. 等待 3–8 分钟，构建完成后在 **Artifacts** 里下载 `app-debug.apk`。
-5. 手机安装：把 `app-debug.apk` 拷到手机，允许「未知来源」安装即可。
-   （debug 签名对个人使用完全够用；要正式签名版看第三节。）
-
-> ⚠️ 本目录已经是 git 仓库，`origin` 已指向你的 `download.git`，当前分支是 `master`，
-> 代码也已提交。你只需在**自己电脑的终端**（不要走本工具的代理网络）执行下面一行即可推送：
+1. 新建**空仓库**（public / private 均可）。
+2. 把本目录内容 push 上去。
+3. 进 **Actions** → `Build APK` → 自动触发（也可 Run workflow）。
+4. 等 3–8 分钟，在 **Artifacts** 下载 `app-debug-apk`（内含 `app-debug.apk`）。
+5. 手机安装：允许「未知来源」即可。debug 签名个人使用足够。
 
 ```bash
-# 在 E:/WorkBuddyPath/2026-10-22-12-52-28/xckcdy-apk 目录下
+git add -A
+git commit -m "feat: 2.0 重构"
 git push -u origin master
 ```
 
-- 如果提示 `failed to push` 是因为远程仓库已有提交（非真正空仓），先 `git pull origin master --rebase` 再推。
-- 构建必须在 GitHub 上触发（需要 Android SDK + NDK + nodejs-mobile 二进制，本地没有也能构建）。
+> 构建必须在 GitHub 上跑（需要 Android SDK + NDK + nodejs-mobile 二进制）。
 
 ---
 
 ## 二、目录结构
 
 ```
-xckcdy-apk/
-├── build.gradle / settings.gradle      Gradle 工程配置
-├── gradle.properties
+.
+├── build.gradle / settings.gradle / gradle.properties
 ├── app/
-│   ├── build.gradle                    AGP 8.5 / minSdk 24 / ndk 26
-│   ├── CMakeLists.txt                  nodejs-mobile 链接配置
+│   ├── build.gradle                    AGP 8.5 / minSdk 24 / targetSdk 34
+│   ├── CMakeLists.txt                 导入 libnode.so + 编译 JNI 桥
 │   ├── proguard-rules.pro
 │   └── src/main/
 │       ├── AndroidManifest.xml
-│       ├── cpp/native-lib.cpp          JNI：调用 node::Start 拉起 Node
-│       ├── java/.../MainActivity.java  启动 Node + WebView + 保存文件
-│       └── assets/nodejs-project/       ← 直接复用电脑版的 Node 代码
-│           ├── main.js                 入口
-│           ├── server.js               服务端（原样）
-│           ├── lib/{http,parser,resolver,hls}.js
-│           └── public/index.html       前端界面（原样）
-└── .github/workflows/build.yml         GitHub Actions 云构建
+│       ├── cpp/native-lib.cpp          JNI：node::Start
+│       ├── java/com/vodbox/downloader/
+│       │   ├── MainActivity.java       WebView + JS 桥
+│       │   ├── DownloadService.java    前台服务：Node + 保存 + 通知
+│       │   ├── NodeRunner.java         native 入口
+│       │   └── MediaStoreHelper.java
+│       └── assets/nodejs-project/      Node 服务 + 前端（电脑上也能直接跑）
+└── .github/workflows/build.yml         GitHub Actions
 ```
 
-`app/libnode/` 由 CI 自动下载填充，**不需要你手动放任何 .so**。
+`app/libnode/` 由 CI 自动下载填充，**不需要手动放任何 .so**。
 
 ---
 
-## 三、正式签名版（可选）
+## 三、电脑上直接跑（调试最方便）
 
-1. 本地生成密钥（一次性）：
+```bash
+cd app/src/main/assets/nodejs-project
+node server.js
+# 浏览器打开 http://localhost:8787
+```
+
+同一 WiFi 的手机可直接访问 `http://<电脑IP>:8787`。
+
+可调参数都在 `config.js`，也支持环境变量：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PORT` | 8787 | 端口 |
+| `APP_BIND` | 安卓 `127.0.0.1` / 桌面 `0.0.0.0` | 监听地址 |
+| `APP_SITE` | 内置站点 | 站点地址（唯一配置点） |
+| `APP_EP_CONC` | 2 | 同时下载几集 |
+| `APP_SEG_CONC` | 8 | 单集分片并发 |
+| `APP_MAX_SOCKETS` | 32 | 全局连接上限 |
+
+---
+
+## 四、正式签名版（可选）
+
+1. 生成密钥：
    ```bash
-   keytool -genkey -v -keystore xckcdy.keystore -alias xckcdy \
+   keytool -genkey -v -keystore vodbox.keystore -alias vodbox \
      -keyalg RSA -keysize 2048 -validity 10000
    ```
-2. 在仓库 **Settings → Secrets → Actions** 增加：
-   - `KEYSTORE_BASE64`：`base64 -w0 xckcdy.keystore` 的输出
-   - `KEY_ALIAS` = `xckcdy`
-   - `KEY_PASSWORD` / `STORE_PASSWORD` = 你的密码
-3. 取消 `build.yml` 末尾 release 段注释，并补一段解码密钥的步骤（参考标准 GitHub Actions 安卓签名范例）。
-4. 重新 Run workflow，下载 `app-release.apk`（可上架/长期分发）。
+2. 仓库 **Settings → Secrets → Actions** 增加：
+   - `KEYSTORE_BASE64`：`base64 -w0 vodbox.keystore` 的输出
+   - `KEY_ALIAS` = `vodbox`
+   - `KEY_PASSWORD` / `STORE_PASSWORD`
+3. 取消 `build.yml` 末尾 release 段注释，补一段解码密钥的步骤。
+4. 重新 Run workflow，下载 `app-release.apk`。
 
 ---
 
-## 四、说明
+## 五、常见问题
 
-- 仅作技术研究与离线收藏用途，请勿用于传播受版权保护的内容。
-- 首次启动会把 `nodejs-project` 从 APK 拷到应用私有目录，之后直接复用，不会重复拷贝。
-- 若站方更换加密脚本，`POST /api/refresh`（或重启 App）会让 `resolver.js` 重新拉取最新 `dypck.js`。
-- 下载文件为标准 MPEG-TS，PotPlayer / VLC / nPlayer 均可播放；转 mp4：
-  `ffmpeg -i 第1集.ts -c copy 第1集.mp4`
+**改了前端/服务端代码，装了新 APK 却没变化？**
+`assets` 只在首次安装时拷到私有目录。改完代码要把 `MainActivity.ASSET_VERSION` 加 1，
+App 升级时会重新拷贝（会保留 `downloads/`、`data/`、`cache/`）。
+
+**下载的文件在哪？**
+App 内部：应用私有目录 `downloads/<剧名>/`；点「保存」后复制到系统 `下载/VodBox/`。
+
+**下载不动/很慢？**
+先把「同时下载」调到 2–3 集；分片并发 8–12 即可。弱网会自动重试，中断后再点下载会从断点续传。
+
+**站方改版导致解析失败？**
+`POST /api/refresh` 会重新拉取播放脚本；连续失败时服务端也会自动重新拉取。
+
+---
+
+## 六、说明
+
+- 仅作技术研究与离线收藏用途，请勿传播受版权保护的内容。
+- 输出为标准 MPEG-TS（`.ts`），PotPlayer / VLC / nPlayer 可直接播放；
+  转 mp4：`ffmpeg -i 第1集.ts -c copy 第1集.mp4`
+- 详细设计与踩坑记录见 `影视下载器-方案文档.md`。

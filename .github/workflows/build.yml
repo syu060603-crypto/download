@@ -84,13 +84,13 @@ jobs:
           find app/libnode -maxdepth 3 -type f | head -40
 
       # 探测 nodejs-mobile 实际提供的 ABI（已从 zip 重排到 app/libnode/lib/），
-      # 写进 gradle.properties 的 xckcdyAbiFilters，让 AGP 只构建这些 ABI。
+      # 写进 gradle.properties 的 vodAbiFilters，让 AGP 只构建这些 ABI。
       - name: Detect available node ABIs and pin abiFilters
         run: |
           ABIS=$(ls app/libnode/lib 2>/dev/null | grep -E '^(arm64-v8a|armeabi-v7a|x86_64|x86)$' | paste -sd, -)
           echo "detected node ABIs: $ABIS"
           if [ -n "$ABIS" ]; then
-            echo "xckcdyAbiFilters=$ABIS" >> gradle.properties
+            echo "vodAbiFilters=$ABIS" >> gradle.properties
           fi
           echo "--- gradle.properties ---"
           cat gradle.properties
