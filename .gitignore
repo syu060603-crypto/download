@@ -25,3 +25,6 @@ npm-debug.log
 app/src/main/assets/nodejs-project/downloads/
 app/src/main/assets/nodejs-project/data/
 app/src/main/assets/nodejs-project/cache/
+
+# WorkBuddy 本地工程数据（记忆/配置），不入库
+.workbuddy-ai/
