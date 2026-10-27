@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ 的备份/迁移规则。
+
+  为什么需要这个文件：光写 android:allowBackup="false"，在部分厂商的 Android 12+ 设备上
+  只禁掉了云备份（Google Drive），**设备间迁移（D2D）照样会把这个 App 的数据搬过去**。
+  官方文档明确要求用 dataExtractionRules 在 <cloud-backup> 和 <device-transfer>
+  两个通道里分别声明排除规则。
+
+  App 私有目录（/data/data/<pkg>/files/nodejs-project/）里只有中转文件、jobs.json 和解析脚本缓存，
+  成品都已经导出到系统「下载/VodBox/」了，所以这里全部排除，不备份、不迁移。
+  用户真正的成果在公共下载目录，卸载/换机都不会动它。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

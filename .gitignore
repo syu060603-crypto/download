@@ -1,0 +1,30 @@
+# Android / Gradle
+*.iml
+.gradle/
+build/
+app/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# nodejs-mobile libs are fetched at build time (CI), never committed
+app/libnode/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*~
+.idea/
+
+# Node project runtime artifacts (kept in assets, but ignore stray)
+node_modules/
+npm-debug.log
+
+# 本地运行时数据（下载文件 / 任务状态 / 脚本缓存），不入库
+app/src/main/assets/nodejs-project/downloads/
+app/src/main/assets/nodejs-project/data/
+app/src/main/assets/nodejs-project/cache/
+
+# WorkBuddy 本地工程数据（记忆/配置），不入库
+.workbuddy-ai/

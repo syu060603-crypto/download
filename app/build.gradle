@@ -1,0 +1,76 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.vodbox.downloader'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.vodbox.downloader"
+        minSdk 24
+        targetSdk 34
+        versionCode 3
+        versionName "2.0.0"
+
+        ndkVersion "26.1.10909125"
+
+        // 只构建配置里列出的 ABI（gradle.properties 的 vodAbiFilters）。
+        // libnode.so 每个 ABI 25-30MB，多打一个就多一份体积，所以默认只留 arm64-v8a。
+        ndk {
+            def abiProp = project.findProperty('vodAbiFilters')?.toString()?.trim()
+            if (abiProp) {
+                abiFilters = abiProp.split(',').collect { it.trim() }.findAll { it }
+            } else {
+                abiFilters 'arm64-v8a'
+            }
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags ""
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            // 调试用，不影响功能
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    // 让 AGP 把官方 libnode.so 一起打进 APK（否则运行时加载 libvodbox 会因找不到
+    // DT_NEEDED 的 libnode.so 而崩溃）。libnode.so 由 CI 按 ABI 放到 app/libnode/lib/<abi>/。
+    sourceSets {
+        main {
+            jniLibs.srcDirs += ['libnode/lib']
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // 压缩 so 再打进 APK：libnode.so 是未压缩存储的，开这个后 APK 能再小 30-40%。
+            // 代价：安装时要解压到 lib 目录、首次启动略慢；安装后占用空间不变。
+            useLegacyPackaging = true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // 仅用系统 WebView，无第三方依赖
+}
