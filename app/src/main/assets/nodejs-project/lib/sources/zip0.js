@@ -66,6 +66,28 @@ function extractFromWatch(html) {
   };
 }
 
+/** 归一化：去空白/标点，统一小写，用于相关性判断 */
+function normTitle(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[\s:：·・'’"“”（）()【】\[\]《》【】,，。.!！?？]+/g, '');
+}
+
+/**
+ * zip0 的 API 在搜不到结果时会返回一份固定的"热门兜底列表"（与关键词无关），
+ * 看起来就像搜什么都一样。这里做相关性过滤：标题与关键词互相不包含的结果
+ * 一律丢弃；过滤后一条不剩就返回空数组，让聚合层如实显示"ZIP0 0 条"。
+ */
+function relevant(list, kw) {
+  const k = normTitle(kw);
+  if (!k) return [];
+  return list.filter((it) => {
+    const t = normTitle(it.title);
+    if (!t) return false;
+    return t.includes(k) || k.includes(t);
+  });
+}
+
 async function search(kw) {
   const url =
     BASE + '/api/videos/search?query=' + encodeURIComponent(kw) + '&page=1&limit=40';
@@ -108,7 +130,7 @@ async function search(kw) {
       episodeCount: v.episodeCount || 0,
     });
   }
-  return out;
+  return relevant(out, kw);
 }
 
 async function detail(id) {
