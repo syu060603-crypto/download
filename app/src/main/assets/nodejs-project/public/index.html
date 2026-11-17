@@ -116,6 +116,11 @@ header.top.scrolled{border-bottom-color:var(--line)}
   position:absolute;left:6px;top:6px;padding:2px 6px;border-radius:6px;font-size:10.5px;font-weight:600;
   color:#fff;background:rgba(0,0,0,.55);backdrop-filter:blur(4px)
 }
+.card .src{
+  position:absolute;right:6px;top:6px;padding:2px 6px;border-radius:6px;font-size:10.5px;font-weight:700;
+  color:#fff;background:rgba(79,70,229,.85);backdrop-filter:blur(4px);letter-spacing:.3px
+}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .card .body{padding:7px 8px 9px}
 .card .t{font-size:12.8px;font-weight:600;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.7em}
 .card .s{font-size:10.8px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -335,6 +340,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
         <div class="chips" id="histChips"></div>
       </div>
       <div class="hint" id="searchHint"></div>
+      <div class="chips" id="srcChips" hidden></div>
       <div class="grid" id="results"></div>
     </section>
 
@@ -526,7 +532,10 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     expanded: {},
     done: {},
     detailVid: null,
-    loadingDetail: false
+    loadingDetail: false,
+    lastResults: [],
+    srcStats: [],
+    srcFilter: 'all'
   };
 
   // ---------------------------------------------------------------- 视图切换
@@ -602,50 +611,29 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     $('#searchHint').innerHTML = '<span class="spin"></span> 正在搜索…';
     skeleton(8);
     pushRecent(kw);
+    S.srcFilter = 'all';
+    $('#srcChips').hidden = true;
 
     try {
       var d = await api('/api/search?kw=' + encodeURIComponent(kw));
       if (seq !== searchSeq) return;
       var list = d.results || [];
+      S.lastResults = list;
+      S.srcStats = d.sources || [];
+      renderSrcChips();
+      var okSrc = S.srcStats.filter(function (s) { return s.ok; });
+      var errSrc = S.srcStats.filter(function (s) { return !s.ok; });
       $('#searchHint').textContent = list.length
-        ? '找到 ' + list.length + ' 个结果' + (d.stale ? '（离线缓存）' : '')
-        : '';
+        ? '找到 ' + list.length + ' 个结果' +
+          (okSrc.length ? ' · ' + okSrc.map(function (s) { return s.name + ' ' + s.count; }).join(' / ') : '') +
+          (errSrc.length ? ' · ' + errSrc.map(function (s) { return s.name + ' 失败'; }).join('、') : '') +
+          (d.stale ? '（离线缓存）' : '')
+        : (errSrc.length ? errSrc[0].error : '');
       if (!list.length) {
         emptyState('🔍', '没有找到「' + kw + '」', '换个关键词试试，或用更短的剧名。', true);
         return;
       }
-      $('#results').innerHTML = list.map(function (it) {
-        return '<button class="card" data-vid="' + esc(it.vid) + '">' +
-          '<div class="ph">' +
-          (it.pic ? '<img loading="lazy" src="' + esc(imgUrl(it.pic)) + '" alt="">' : '<div class="fb">🎬</div>') +
-          (it.note ? '<span class="tag">' + esc(it.note) + '</span>' : '') +
-          '</div>' +
-          '<div class="body"><div class="t">' + esc(it.title) + '</div>' +
-          (it.actors ? '<div class="s">' + esc(it.actors) + '</div>' : '') +
-          '</div></button>';
-      }).join('');
-
-      $$('#results img').forEach(function (im) {
-        function done() { im.classList.add('loaded'); }
-        function fail() {
-          var ph = im.parentNode;
-          if (!ph) return;
-          im.remove();
-          if (!ph.querySelector('.fb')) {
-            var fb = document.createElement('div');
-            fb.className = 'fb';
-            fb.textContent = '🎬';
-            ph.appendChild(fb);
-          }
-        }
-        // 图片可能已从缓存加载完成，回调绑定时 load 事件已经过去了
-        if (im.complete && im.naturalWidth > 0) done();
-        im.addEventListener('load', done);
-        im.addEventListener('error', fail);
-      });
-      $$('#results .card').forEach(function (c) {
-        c.onclick = function () { openDetail(c.dataset.vid); };
-      });
+      renderResults(list);
     } catch (e) {
       if (seq !== searchSeq) return;
       $('#searchHint').className = 'hint err';
@@ -654,6 +642,69 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     } finally {
       if (seq === searchSeq) $('#btnSearch').disabled = false;
     }
+  }
+
+  var SRC_NAMES = { xckcdy: '星辰', zip0: 'ZIP0' };
+  function srcName(s) { return (SRC_NAMES[s] || s || '').toUpperCase(); }
+
+  function renderSrcChips() {
+    var st = S.srcStats;
+    if (!st.length || st.length < 2) { $('#srcChips').hidden = true; return; }
+    var total = {};
+    S.lastResults.forEach(function (it) { total[it.source] = (total[it.source] || 0) + 1; });
+    var h = '<button class="chip' + (S.srcFilter === 'all' ? ' on' : '') + '" data-s="all">全部 ' + S.lastResults.length + '</button>';
+    st.forEach(function (s) {
+      var n = total[s.source] || 0;
+      if (!n) return;
+      h += '<button class="chip' + (S.srcFilter === s.source ? ' on' : '') + '" data-s="' + esc(s.source) + '">' +
+        esc(s.name) + ' ' + n + '</button>';
+    });
+    $('#srcChips').innerHTML = h;
+    $('#srcChips').hidden = false;
+    $$('#srcChips .chip').forEach(function (c) {
+      c.onclick = function () {
+        S.srcFilter = c.dataset.s;
+        renderSrcChips();
+        renderResults(S.lastResults);
+      };
+    });
+  }
+
+  function renderResults(list) {
+    var shown = S.srcFilter === 'all' ? list : list.filter(function (it) { return it.source === S.srcFilter; });
+    $('#results').innerHTML = shown.map(function (it) {
+      return '<button class="card" data-vid="' + esc(it.id) + '" data-src="' + esc(it.source || 'xckcdy') + '">' +
+        '<div class="ph">' +
+        (it.pic ? '<img loading="lazy" src="' + esc(imgUrl(it.pic)) + '" alt="">' : '<div class="fb">🎬</div>') +
+        (it.note ? '<span class="tag">' + esc(it.note) + '</span>' : '') +
+        '<span class="src">' + esc(srcName(it.source)) + '</span>' +
+        '</div>' +
+        '<div class="body"><div class="t">' + esc(it.title) + '</div>' +
+        (it.actors ? '<div class="s">' + esc(it.actors) + '</div>' : '') +
+        '</div></button>';
+    }).join('');
+
+    $$('#results img').forEach(function (im) {
+      function done() { im.classList.add('loaded'); }
+      function fail() {
+        var ph = im.parentNode;
+        if (!ph) return;
+        im.remove();
+        if (!ph.querySelector('.fb')) {
+          var fb = document.createElement('div');
+          fb.className = 'fb';
+          fb.textContent = '🎬';
+          ph.appendChild(fb);
+        }
+      }
+      // 图片可能已从缓存加载完成，回调绑定时 load 事件已经过去了
+      if (im.complete && im.naturalWidth > 0) done();
+      im.addEventListener('load', done);
+      im.addEventListener('error', fail);
+    });
+    $$('#results .card').forEach(function (c) {
+      c.onclick = function () { openDetail(c.dataset.vid, c.dataset.src); };
+    });
   }
 
   $('#searchForm').onsubmit = function (e) { e.preventDefault(); doSearch(); };
@@ -705,8 +756,9 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     return out.join('');
   }
 
-  async function openDetail(vid) {
-    S.detailVid = vid;
+  async function openDetail(vid, source) {
+    var src = source || 'xckcdy';
+    S.detailVid = src + ':' + vid;
     S.detail = null;
     S.pid = null;
     S.sel = {};
@@ -722,8 +774,9 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     openSheet();
 
     try {
-      var d = await api('/api/detail?vid=' + encodeURIComponent(vid));
-      if (S.detailVid !== vid) return;
+      var d = await api('/api/detail?vid=' + encodeURIComponent(vid) + '&source=' + encodeURIComponent(src));
+      if (S.detailVid !== src + ':' + vid) return;
+      d.source = d.source || src;
       S.detail = d;
       S.pid = d.groups && d.groups.length ? d.groups[0].pid : null;
       $('#dTitle').textContent = d.title || '未命名';
@@ -783,7 +836,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
   function renderEps() {
     var g = curGroup();
     if (!g) { $('#dEps').innerHTML = '<div class="empty" style="grid-column:1/-1"><b>没有可用分集</b></div>'; return; }
-    var vid = S.detail.vid;
+    var vid = S.detail.source + ':' + S.detail.id;
     $('#dEps').innerHTML = g.episodes.map(function (ep) {
       var k = key(g.pid, ep.epid);
       var on = !!S.sel[k];
@@ -818,7 +871,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
       var g = curGroup();
       if (!g) return;
       var act = b.dataset.act;
-      var vid = S.detail.vid;
+      var vid = S.detail.source + ':' + S.detail.id;
       if (act === 'all') g.episodes.forEach(function (e) { S.sel[key(g.pid, e.epid)] = 1; });
       if (act === 'none') S.sel = {};
       if (act === 'invert') g.episodes.forEach(function (e) {
@@ -858,7 +911,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     var items = [];
     g.episodes.forEach(function (ep) {
       if (S.sel[key(g.pid, ep.epid)]) {
-        items.push({ vid: S.detail.vid, pid: g.pid, epid: ep.epid, name: ep.name });
+        items.push({ source: S.detail.source, vid: S.detail.id, pid: g.pid, epid: ep.epid, name: ep.name });
       }
     });
     if (!items.length) return;
@@ -879,7 +932,8 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: S.detail.title,
-          vid: S.detail.vid,
+          source: S.detail.source,
+          vid: S.detail.id,
           pic: S.detail.pic,
           items: items,
           quality: $('#dQuality').value,
@@ -942,7 +996,8 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
   function renderJob(el, j) {
     var st = statusInfo(j);
     $('.jt b', el).textContent = j.title;
-    $('.jt small', el).textContent = j.stats.finished + '/' + j.stats.count + ' 集 · ' + j.stats.percent + '% · ' + fmtSize(j.stats.bytes) +
+    $('.jt small', el).textContent = (j.source && j.source !== 'xckcdy' ? '[' + srcName(j.source) + '] ' : '') +
+      j.stats.finished + '/' + j.stats.count + ' 集 · ' + j.stats.percent + '% · ' + fmtSize(j.stats.bytes) +
       (j.stats.speed ? ' · ' + fmtSpeed(j.stats.speed) : '') +
       (j.stats.eta ? ' · 剩 ' + fmtEta(j.stats.eta) : '') +
       (j.stats.saved ? ' · 已保存 ' + j.stats.saved + '/' + j.stats.count : '') +
@@ -1133,7 +1188,7 @@ html[data-theme="dark"] .act.dan{border-color:#5a2a2d}
     S.done = {};
     list.forEach(function (j) {
       j.files.forEach(function (f) {
-        if (f.status === 'done' || f.status === 'skipped') S.done[(j.vid || '') + '-' + f.pid + '-' + f.epid] = 1;
+        if (f.status === 'done' || f.status === 'skipped') S.done[(f.source || j.source || 'xckcdy') + ':' + (f.vid || j.vid || '') + '-' + f.pid + '-' + f.epid] = 1;
       });
     });
 

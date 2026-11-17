@@ -15,9 +15,9 @@ const os = require('os');
 const { URL } = require('url');
 
 const CFG = require('./config');
-const { getText, getBuffer } = require('./lib/http');
-const parser = require('./lib/parser');
+const { getBuffer } = require('./lib/http');
 const resolver = require('./lib/resolver');
+const sources = require('./lib/sources');
 const jobsMgr = require('./lib/jobs');
 
 const VERSION = '2.0.0';
@@ -106,8 +106,8 @@ function serveStatic(req, res, urlPath) {
 }
 
 // ---------------------------------------------------------------- 缓存
-const searchCache = new Map(); // kw -> {ts, results}
-const detailCache = new Map(); // vid -> {ts, data}
+const searchCache = new Map(); // kw -> {ts, results, sources}
+const detailCache = new Map(); // source:id -> {ts, data}
 
 function cachePut(map, key, val, max) {
   map.set(key, val);
@@ -117,103 +117,93 @@ function cachePut(map, key, val, max) {
   }
 }
 
-// ---------------------------------------------------------------- 搜索
-function looksBlocked(html) {
-  return /(访问过于频繁|请输入验证码|安全验证|人机验证|Just a moment|cf-browser-verification)/i.test(html);
-}
-
+// ---------------------------------------------------------------- 搜索（聚合）
 async function apiSearch(req, res, q) {
   const kw = (q.get('kw') || '').trim().slice(0, 60);
   if (!kw) return json(res, 400, { error: '缺少关键词' });
   const t0 = Date.now();
   const hit = searchCache.get(kw);
   if (hit && Date.now() - hit.ts < CFG.SEARCH_CACHE_TTL && !q.get('refresh')) {
-    return json(res, 200, { kw, results: hit.results, cached: true, took: 0 });
+    return json(res, 200, { kw, results: hit.results, sources: hit.sources, cached: true, took: 0 });
   }
 
-  let lastErr = null;
-  for (const base of CFG.SITE_CANDIDATES) {
-    const url = base + '/search?kw=' + encodeURIComponent(kw);
-    try {
-      const html = await getText(url, {
-        headers: { Referer: base + '/' },
-        timeout: 20000,
-        retry: 2,
-      });
-      if (looksBlocked(html)) {
-        lastErr = new Error('站点要求验证，请稍后重试');
-        continue;
-      }
-      const results = parser.parseSearch(html, base);
-      if (results.length || /没有找到|暂无/i.test(html)) {
-        cachePut(searchCache, kw, { ts: Date.now(), results }, CFG.SEARCH_CACHE_MAX);
-        return json(res, 200, { kw, results, cached: false, took: Date.now() - t0 });
-      }
-      lastErr = new Error('站点返回内容异常');
-    } catch (e) {
-      lastErr = e;
-    }
-  }
+  // 并发搜所有启用的来源；单源失败不影响其它来源
+  const agg = await sources.searchAll(kw);
+  const allFailed = agg.sources.length > 0 && agg.sources.every((s) => !s.ok);
 
   // 全部失败：有旧缓存就先用旧的，界面提示"离线结果"
-  if (hit) {
-    return json(res, 200, { kw, results: hit.results, cached: true, stale: true, took: Date.now() - t0 });
+  if (allFailed && hit) {
+    return json(res, 200, {
+      kw,
+      results: hit.results,
+      sources: hit.sources,
+      cached: true,
+      stale: true,
+      took: Date.now() - t0,
+    });
   }
-  return json(res, 502, { error: '搜索失败：' + (lastErr ? lastErr.message : '网络不可用') + '，请检查网络后重试' });
+  if (allFailed && !hit) {
+    const msg = agg.sources.map((s) => s.name + '：' + (s.error || '失败')).join('；');
+    return json(res, 502, { error: '搜索失败（' + msg + '）。请检查网络后重试。', sources: agg.sources });
+  }
+
+  cachePut(
+    searchCache,
+    kw,
+    { ts: Date.now(), results: agg.results, sources: agg.sources },
+    CFG.SEARCH_CACHE_MAX
+  );
+  return json(res, 200, { kw, results: agg.results, sources: agg.sources, cached: false, took: Date.now() - t0 });
 }
 
-// ---------------------------------------------------------------- 详情
+// ---------------------------------------------------------------- 详情（按来源路由）
 async function apiDetail(req, res, q) {
+  const source = (q.get('source') || 'xckcdy').trim();
   const vid = (q.get('vid') || '').trim();
-  if (!/^\d+$/.test(vid)) return json(res, 400, { error: 'vid 非法' });
-  const hit = detailCache.get(vid);
+  if (!vid) return json(res, 400, { error: '缺少 vid' });
+  if (!sources.get(source)) return json(res, 400, { error: '未知来源: ' + source });
+
+  const ck = source + ':' + vid;
+  const hit = detailCache.get(ck);
   if (hit && Date.now() - hit.ts < CFG.DETAIL_CACHE_TTL && !q.get('refresh')) {
     return json(res, 200, Object.assign({ cached: true }, hit.data));
   }
-  let lastErr = null;
-  for (const base of CFG.SITE_CANDIDATES) {
-    try {
-      const html = await getText(base + '/vd/' + vid + '.html', {
-        headers: { Referer: base + '/' },
-        timeout: 20000,
-        retry: 2,
-      });
-      const data = parser.parseDetail(html, base);
-      if (!data.groups.length) {
-        lastErr = new Error('没有解析到分集，可能已下架');
-        continue;
-      }
-      data.vid = vid;
-      data.url = base + '/vd/' + vid + '.html';
-      cachePut(detailCache, vid, { ts: Date.now(), data }, 200);
-      return json(res, 200, Object.assign({ cached: false }, data));
-    } catch (e) {
-      lastErr = e;
-    }
+  try {
+    const data = await sources.detail(source, vid);
+    cachePut(detailCache, ck, { ts: Date.now(), data }, 300);
+    return json(res, 200, Object.assign({ cached: false }, data));
+  } catch (e) {
+    if (hit) return json(res, 200, Object.assign({ cached: true, stale: true }, hit.data));
+    return json(res, 502, { error: '详情加载失败：' + (e && e.message ? e.message : '未知错误') });
   }
-  if (hit) return json(res, 200, Object.assign({ cached: true, stale: true }, hit.data));
-  return json(res, 502, { error: '详情加载失败：' + (lastErr ? lastErr.message : '未知错误') });
 }
 
-// ---------------------------------------------------------------- 解析
+// ---------------------------------------------------------------- 解析（按来源路由）
 async function apiResolve(req, res) {
   const body = await readBody(req);
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) return json(res, 400, { error: '没有待解析的分集' });
   const concurrency = Math.min(Math.max(parseInt(body.concurrency, 10) || CFG.RESOLVE_CONCURRENCY, 1), 8);
-  const results = await resolver.resolveMany(
-    items.map((i) => ({ vid: String(i.vid), pid: parseInt(i.pid, 10) || 0, epid: parseInt(i.epid, 10) || 0 })),
-    concurrency
-  );
-  const out = results.map((r, i) => ({
-    vid: String(items[i].vid),
-    pid: parseInt(items[i].pid, 10) || 0,
-    epid: parseInt(items[i].epid, 10) || 0,
-    name: items[i].name || '',
-    m3u8: r && r.m3u8 ? r.m3u8 : null,
-    error: r && r.error ? r.error : null,
-  }));
-  json(res, 200, { results: out });
+
+  // 按来源分组后并行解析
+  const results = new Array(items.length).fill(null);
+  let idx = 0;
+  async function worker() {
+    for (;;) {
+      const i = idx++;
+      if (i >= items.length) return;
+      const it = items[i];
+      const src = String(it.source || body.source || 'xckcdy');
+      try {
+        const r = await sources.resolve(src, String(it.vid), parseInt(it.pid, 10) || 0, parseInt(it.epid, 10) || 0);
+        results[i] = { source: src, vid: String(it.vid), pid: parseInt(it.pid, 10) || 0, epid: parseInt(it.epid, 10) || 0, name: it.name || '', m3u8: r && r.m3u8 ? r.m3u8 : null, error: null };
+      } catch (e) {
+        results[i] = { source: src, vid: String(it.vid), pid: parseInt(it.pid, 10) || 0, epid: parseInt(it.epid, 10) || 0, name: it.name || '', m3u8: null, error: (e && e.message) || '解析失败' };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  json(res, 200, { results });
 }
 
 // ---------------------------------------------------------------- 任务
@@ -460,6 +450,7 @@ const server = http.createServer(async (req, res) => {
         lanIps: lanIps(),
         downloadDir: CFG.DOWNLOAD_DIR,
         uptime: Math.round((Date.now() - START_AT) / 1000),
+        sources: sources.listSources(),
         defaults: {
           episodeConcurrency: CFG.EPISODE_CONCURRENCY,
           segmentConcurrency: CFG.SEGMENT_CONCURRENCY,
@@ -469,6 +460,8 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (p === '/api/health') return json(res, 200, { ok: true, version: VERSION });
+
+    if (p === '/api/sources') return json(res, 200, { sources: sources.listSources() });
 
     if (p === '/api/search') return await apiSearch(req, res, q);
     if (p === '/api/detail') return await apiDetail(req, res, q);

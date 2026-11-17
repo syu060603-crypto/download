@@ -121,6 +121,15 @@ module.exports = {
   EXPORT_AUTO: envBool('APP_EXPORT_AUTO', true),
   EXPORT_DELETE_LOCAL: envBool('APP_EXPORT_DELETE_LOCAL', true),
 
+  // ---------------------------------------------------------------- 多源播放
+  // 除主站外还聚合了以下来源，搜索时并发查询、合并去重、标注来源。
+  // 每个源都能用环境变量单独开关：APP_SRC_ZIP0 / APP_SRC_XCKCDY
+  ZIP0_BASE: envStr('APP_ZIP0_BASE', 'https://zip0.com').replace(/\/+$/, ''),
+  SRC_XCKCDY_ENABLED: envBool('APP_SRC_XCKCDY', true),
+  SRC_ZIP0_ENABLED: envBool('APP_SRC_ZIP0', true),
+  // 单个来源搜索的超时与总上限，避免一个慢源拖住整个搜索
+  SOURCE_SEARCH_TIMEOUT: envInt('APP_SRC_SEARCH_TIMEOUT', 15000),
+
   // ---------------------------------------------------------------- 缓存
   SEARCH_CACHE_TTL: 10 * 60 * 1000,
   DETAIL_CACHE_TTL: 30 * 60 * 1000,

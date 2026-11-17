@@ -16,7 +16,7 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const CFG = require('../config');
 const hls = require('./hls');
-const resolver = require('./resolver');
+const sources = require('./sources');
 
 const JOBS_FILE = path.join(CFG.DATA_DIR, 'jobs.json');
 const MAX_JOBS = 40;
@@ -104,6 +104,7 @@ function fileSnapshot(f, i) {
   return {
     idx: i,
     name: f.name,
+    source: f.source || 'xckcdy',
     vid: f.vid,
     pid: f.pid,
     epid: f.epid,
@@ -153,6 +154,7 @@ function snapshot(job) {
     title: job.title,
     pic: job.pic || '',
     vid: job.vid || '',
+    source: job.source || 'xckcdy',
     status: job.status,
     createdAt: job.createdAt,
     finishedAt: job.finishedAt || 0,
@@ -210,6 +212,7 @@ function create(body) {
     used.add(name);
     return {
       name: name,
+      source: String(it.source || body.source || 'xckcdy'),
       vid: String(it.vid),
       pid: parseInt(it.pid, 10) || 0,
       epid: parseInt(it.epid, 10) || 0,
@@ -233,6 +236,7 @@ function create(body) {
     title,
     pic: body.pic || '',
     vid: String(body.vid || ''),
+    source: String(body.source || 'xckcdy'),
     quality,
     episodeConcurrency,
     segmentConcurrency,
@@ -300,9 +304,9 @@ async function runFile(job, f, ctl) {
     /* noop */
   }
 
-  // 解析
+  // 解析（已有 m3u8 的来源如 ZIP0 会直接跳过）
   if (!f.m3u8) {
-    const r = await resolver.resolveEpisode(f.vid, f.pid, f.epid);
+    const r = await sources.resolve(f.source || 'xckcdy', f.vid, f.pid, f.epid);
     f.m3u8 = r.m3u8;
   }
 
@@ -380,7 +384,7 @@ async function runJob(job) {
           if ((f.attempts || 0) < 2) {
             f.m3u8 = null;
             try {
-              const r = await resolver.resolveEpisode(f.vid, f.pid, f.epid, { ttl: 0 });
+              const r = await sources.resolve(f.source || 'xckcdy', f.vid, f.pid, f.epid, { ttl: 0 });
               f.m3u8 = r.m3u8;
               await runFile(job, f, ctl);
               emit('file', job);

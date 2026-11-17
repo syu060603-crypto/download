@@ -5,6 +5,7 @@ Node 服务（`127.0.0.1:8787`），内置 WebView 打开界面。下载、解�
 不依赖电脑、不依赖任何外部服务器。
 
 - 搜索剧名 → 选线路 → 勾选分集 → 批量下载
+- **多源聚合搜索**：一次关键词并发查所有来源（星辰 / ZIP0），结果合并去重、带来源角标、可按来源筛选
 - 前台服务保活：切后台、锁屏、划掉任务卡片都能继续下
 - 多集并行、分片并发、断点续传、暂停/继续/重试
 - **自动剔除正片中间插播的广告**（不影响时间轴，播放不卡顿、不音画不同步）
@@ -95,7 +96,10 @@ Node 服务（`127.0.0.1:8787`），内置 WebView 打开界面。下载、解�
 | `config.js` | 站点地址与全部可调参数，**唯一配置点** |
 | `server.js` | HTTP API + SSE 进度推送 + 封面代理 + 静态文件 |
 | `lib/http.js` | keep-alive 连接池、重试、Cookie、超时 |
-| `lib/parser.js` | 搜索页 / 详情页解析、标题清洗 |
+| `lib/sources/index.js` | **多源注册与聚合**：并发搜索、合并去重、按来源路由详情/解析 |
+| `lib/sources/xckcdy.js` | 来源适配器：星辰主站（搜索/详情解析 + 沙箱解析） |
+| `lib/sources/zip0.js` | 来源适配器：ZIP0 聚合站（公开搜索 API + watch 页 SSR 抽选集 m3u8） |
+| `lib/parser.js` | 主站搜索页 / 详情页解析、标题清洗 |
 | `lib/resolver.js` | `vm` 沙箱执行站方脚本，解析真实 m3u8 |
 | `lib/hls.js` | m3u8 解析、有界窗口并发、单写者异步写盘、断点续传 |
 | `lib/ads.js` | 广告块识别（断点切块 + 流参数指纹） |
@@ -134,7 +138,37 @@ Node 服务（`127.0.0.1:8787`），内置 WebView 打开界面。下载、解�
 
 ---
 
-## 五、目录结构
+## 五、多源聚合（搜索/详情/下载全链路）
+
+搜索、详情、解析、下载都抽象成了「来源适配器」，新来源只需实现三个方法并注册进
+`lib/sources/index.js`：
+
+```js
+{ id, name, enabled,
+  search(kw)                  -> [{ source, id, title, pic, note, actors }],
+  detail(id)                  -> { title, pic, meta, groups:[{pid,name,episodes:[{epid,name,m3u8?}]}] },
+  resolve(id, pid, epid, opt) -> { m3u8 } }
+```
+
+| 来源 | 接入方式 | 状态 |
+|---|---|---|
+| 星辰（主站） | 页面解析 + `vm` 沙箱跑站方播放脚本 | ✅ 默认启用 |
+| ZIP0 | 公开 API `/api/videos/search` + watch 页 SSR 内嵌选集 m3u8 | ✅ 默认启用 |
+
+- 聚合搜索单源超时/失败互不影响，提示栏会显示每个来源的结果数或失败原因；
+- 相同标题的结果按来源优先级去重（星辰 > ZIP0）；
+- 搜索结果卡片右上角有来源角标，来源条（≥2 个来源出结果时出现）可筛选；
+- ZIP0 的 m3u8 在详情阶段已全部拿到，下载时直接跳过解析步骤。
+
+### 新增一个来源的步骤
+
+1. 在 `lib/sources/` 里照着 `zip0.js` 写一个适配器（search/detail/resolve 三件套）；
+2. `lib/sources/index.js` 的 `ALL` 数组里注册（数组顺序 = 去重优先级）；
+3. `config.js` 里加开关与地址，`public/index.html` 的 `SRC_NAMES` 里加显示名。
+
+---
+
+## 六、目录结构
 
 ```
 .
@@ -162,7 +196,7 @@ Node 服务（`127.0.0.1:8787`），内置 WebView 打开界面。下载、解�
 
 ---
 
-## 六、构建
+## 七、构建
 
 ### 云构建（推荐，本地零安装）
 
@@ -229,7 +263,7 @@ APK 里绝大部分体积就是 `libnode.so`——nodejs-mobile 把整个 Node �
 
 ---
 
-## 七、配置
+## 八、配置
 
 全部参数在 `config.js`，也支持环境变量覆盖：
 
@@ -244,16 +278,21 @@ APK 里绝大部分体积就是 `libnode.so`——nodejs-mobile 把整个 Node �
 | `APP_STRIP_ADS` | 1 | 剔除插播广告（0 关闭） |
 | `APP_EXPORT_AUTO` | 1 | 下完自动导出到系统下载目录 |
 | `APP_EXPORT_DELETE_LOCAL` | 1 | 导出成功后删掉私有目录的中转文件 |
+| `APP_SRC_XCKCDY` | 1 | 启用「星辰」主站来源 |
+| `APP_SRC_ZIP0` | 1 | 启用 ZIP0 来源 |
+| `APP_ZIP0_BASE` | `https://zip0.com` | ZIP0 地址（站点换域名时改这里） |
+| `APP_SRC_SEARCH_TIMEOUT` | 15000 | 单个来源的搜索超时（毫秒） |
 
 ---
 
-## 八、接口
+## 九、接口
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/search?kw=` | 搜索（缓存 + 重试 + 多域名兜底） |
-| `GET /api/detail?vid=` | 剧集信息 + 线路 + 分集 |
-| `POST /api/resolve` | 批量解析真实 m3u8 |
+| `GET /api/search?kw=` | 聚合搜索：并发查所有启用来源，合并去重，返回 `results` + `sources` 状态 |
+| `GET /api/detail?vid=&source=` | 剧集信息 + 线路 + 分集（source 默认 `xckcdy`，兼容旧参数） |
+| `POST /api/resolve` | 批量解析真实 m3u8（按 item 的 source 路由） |
+| `GET /api/sources` | 已注册来源列表与启用状态 |
 | `POST /api/download` | 创建下载任务 |
 | `GET /api/jobs` | 任务列表与进度 |
 | `GET /api/events` | SSE 实时推送 |
@@ -269,7 +308,7 @@ APK 里绝大部分体积就是 `libnode.so`——nodejs-mobile 把整个 Node �
 
 ---
 
-## 九、常见问题
+## 十、常见问题
 
 **改了前端/服务端代码，装了新 APK 却没变化？**
 `assets` 只在首次安装时拷到私有目录。改完 `assets/nodejs-project/**` 里的任何文件，
@@ -298,7 +337,7 @@ APK 里绝大部分体积就是 `libnode.so`——nodejs-mobile 把整个 Node �
 
 ---
 
-## 十、构建踩坑（改构建文件前先看，别回退）
+## 十一、构建踩坑（改构建文件前先看，别回退）
 
 | # | 现象 | 根因 | 修复 |
 |---|---|---|---|
@@ -319,7 +358,7 @@ APK 里绝大部分体积就是 `libnode.so`——nodejs-mobile 把整个 Node �
 
 ---
 
-## 十一、说明
+## 十二、说明
 
 - 仅作技术研究与离线收藏用途，请勿传播受版权保护的内容。
 - 输出为标准 MPEG-TS（`.ts`），PotPlayer / VLC / nPlayer 可直接播放；
