@@ -79,16 +79,11 @@ async function searchAll(kw) {
     })
   );
 
-  // 合并 + 按标题去重（保留高优先级来源）
-  const seen = new Set();
+  // 合并：不做跨源标题去重——同名不同源正是备选下载线路，合并会让
+  // "总数 10 实际只显示 1 条"。各源内部的结果原样保留。
   const results = [];
   for (const r of settled) {
-    for (const it of r.results) {
-      const key = normTitle(it.title);
-      if (key && seen.has(key)) continue;
-      if (key) seen.add(key);
-      results.push(it);
-    }
+    for (const it of r.results) results.push(it);
   }
 
   return {

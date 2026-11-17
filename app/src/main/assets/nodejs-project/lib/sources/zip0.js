@@ -134,7 +134,8 @@ async function queryApi(kw) {
       /* url 字段缺失或非法，跳过 */
     }
     if (!src || !vid) continue;
-    const note = [v.remarks, v.score && v.score !== '0.0' ? v.score + '分' : '', v.category]
+    // 上游源名放最前，同名影片不同采集源（mdzy/bfzy/...）可区分、可当备选线路
+    const note = [src.toUpperCase(), v.remarks, v.score && v.score !== '0.0' ? v.score + '分' : '', v.category]
       .filter(Boolean)
       .join(' · ');
     out.push({
