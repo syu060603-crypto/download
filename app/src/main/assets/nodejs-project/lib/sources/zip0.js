@@ -66,11 +66,21 @@ function extractFromWatch(html) {
   };
 }
 
-/** 归一化：去空白/标点，统一小写，用于相关性判断 */
+/** 归一化：去空白/标点、统一小写，用于相关性判断 */
 function normTitle(s) {
   return String(s || '')
     .toLowerCase()
     .replace(/[\s:：·・'’"“”（）()【】\[\]《》【】,，。.!！?？]+/g, '');
+}
+
+/**
+ * 季数感知归一化：在 normTitle 基础上，把阿拉伯数字转成中文数字，
+ * 并去掉"第/季/部"——这样「庆余年2」能匹配到「庆余年 第二季」。
+ */
+function normSeason(s) {
+  return normTitle(s)
+    .replace(/[0-9]/g, (c) => '〇一二三四五六七八九'[+c] || c)
+    .replace(/[第季部]/g, '');
 }
 
 /**
@@ -79,16 +89,24 @@ function normTitle(s) {
  * 一律丢弃；过滤后一条不剩就返回空数组，让聚合层如实显示"ZIP0 0 条"。
  */
 function relevant(list, kw) {
-  const k = normTitle(kw);
+  const k = normSeason(kw);
   if (!k) return [];
   return list.filter((it) => {
-    const t = normTitle(it.title);
+    const t = normSeason(it.title);
     if (!t) return false;
     return t.includes(k) || k.includes(t);
   });
 }
 
-async function search(kw) {
+/** 生成重查变体：去掉结尾的季数标记（"庆余年2"→"庆余年"、"斗罗大陆第二季"→"斗罗大陆"） */
+function kwVariant(kw) {
+  const v = String(kw || '')
+    .replace(/(第[0-9〇一二三四五六七八九十百]+[季部]|[0-9]+|[〇一二三四五六七八九十百]+)$/, '')
+    .trim();
+  return normTitle(v).length >= 2 ? v : '';
+}
+
+async function queryApi(kw) {
   const url =
     BASE + '/api/videos/search?query=' + encodeURIComponent(kw) + '&page=1&limit=40';
   const txt = await getText(url, {
@@ -130,7 +148,21 @@ async function search(kw) {
       episodeCount: v.episodeCount || 0,
     });
   }
-  return relevant(out, kw);
+  return out;
+}
+
+async function search(kw) {
+  const list = await queryApi(kw);
+  const hits = relevant(list, kw);
+  if (hits.length) return hits;
+
+  // 第一轮零命中：用去掉季数的变体词重查一次（网页搜索能匹配"庆余年2"→"第二季"，这里补齐）
+  const variant = kwVariant(kw);
+  if (variant && variant !== normTitle(kw)) {
+    const list2 = await queryApi(variant);
+    return relevant(list2, kw);
+  }
+  return [];
 }
 
 async function detail(id) {
